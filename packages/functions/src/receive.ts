@@ -19,7 +19,17 @@ async function fetchRawEmail(key: string): Promise<Buffer> {
 
 export const handler: SESHandler = async (event) => {
   for (const record of event.Records) {
-    const { mail } = record.ses;
+    const { mail, receipt } = record.ses;
+
+    if (
+      receipt.spamVerdict.status === "FAIL" ||
+      receipt.virusVerdict.status === "FAIL"
+    ) {
+      console.log(
+        `Dropping message ${mail.messageId}: spam=${receipt.spamVerdict.status} virus=${receipt.virusVerdict.status}`
+      );
+      continue;
+    }
 
     const toAddresses = mail.destination.filter((addr) =>
       addr.toLowerCase().endsWith(`@${DOMAIN}`)
