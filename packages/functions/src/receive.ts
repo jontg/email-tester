@@ -1,14 +1,19 @@
 import type { SESHandler } from "aws-lambda";
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import PostalMime from "postal-mime";
 import { isValidToken, normalizeToken, buildSk, putMessage } from "@givemeyouremail/core";
 
 const DOMAIN = "givemeyour.email";
 const TTL_SECONDS = 86400;
+const MAX_EMAIL_BYTES = 1_048_576; // 1 MB
 const s3 = new S3Client({});
 const BUCKET = process.env.EMAIL_BUCKET!;
 
-async function fetchRawEmail(key: string): Promise<Buffer> {
+async function fetchRawEmail(key: string): Promise<Buffer | null> {
+  const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+  if ((head.ContentLength ?? 0) > MAX_EMAIL_BYTES) {
+    return null;
+  }
   const res = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
   const chunks: Uint8Array[] = [];
   for await (const chunk of res.Body as AsyncIterable<Uint8Array>) {
@@ -41,6 +46,10 @@ export const handler: SESHandler = async (event) => {
 
     try {
       const raw = await fetchRawEmail(s3Key);
+      if (raw === null) {
+        console.log(`Dropping message ${mail.messageId}: exceeds ${MAX_EMAIL_BYTES} byte limit`);
+        continue;
+      }
       parsed = await new PostalMime().parse(raw);
     } catch (err) {
       console.error(`Failed to fetch/parse raw email ${s3Key}:`, err);
