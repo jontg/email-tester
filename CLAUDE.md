@@ -57,12 +57,27 @@ sst deploy --stage production
 
 - [ ] Verify `givemeyour.email` domain in SES (DNS TXT + MX records)
 - [ ] Set MX record: `10 inbound-smtp.us-east-1.amazonaws.com`
-- [ ] Create SES receipt rule set, make it active
-- [ ] Add receipt rule: `*@givemeyour.email` → Lambda action → `ReceiveFunction` ARN (from SST outputs)
-- [ ] Grant SES permission to invoke Lambda (see comment in `sst.config.ts`)
+- [ ] Create SES receipt rule set and make it active
+- [ ] Add receipt rule for `*@givemeyour.email` with two ordered actions:
+  1. *S3 action* → bucket: `EmailsBucket` (from `sst deploy` outputs), prefix: `emails/`
+  2. *Lambda action* → `ReceiveFunction` ARN (from `sst deploy` outputs)
+- [ ] Add S3 bucket policy allowing SES to `s3:PutObject` (Principal: `ses.amazonaws.com`, Condition: `aws:SourceAccount = <your account id>`)
+- [ ] SES auto-grants Lambda invoke permission when you add the Lambda action in the rule
+
+## Flow
+
+```
+Email → SES receipt rule
+  → S3 (raw email at emails/<messageId>)
+  → Lambda receive.handler
+      → fetches raw from S3
+      → parses with postal-mime (subject, from, bodyText, bodyHtml)
+      → writes to DynamoDB (TTL 24h)
+  → S3 objects auto-deleted after 2 days (lifecycle rule)
+```
 
 ## Known limitations / TODOs
 
-- `receive.ts` currently only stores headers (subject, from). Full body parsing requires the SES → S3 → Lambda pattern: configure the receipt rule to save raw email to S3, then fetch + parse with `postal-mime` in the Lambda.
 - Rate limiting: add WAF to API Gateway for IP-based rate limiting
+- Attachments: `postal-mime` parses them but `StoredMessage` doesn't store them yet — add if needed
 - Payment flow: TBD — free tier = 1 inbox, 24h TTL; paid = more inboxes, longer TTL, webhooks

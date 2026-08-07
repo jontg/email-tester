@@ -1,5 +1,5 @@
 import { SSTConfig } from "sst";
-import { Api, Table, Function as SSTFunction } from "sst/constructs";
+import { Api, Bucket, Table, Function as SSTFunction } from "sst/constructs";
 
 export default {
   config(_input) {
@@ -19,16 +19,34 @@ export default {
         timeToLiveAttribute: "ttl",
       });
 
+      // SES writes raw email to this bucket before invoking the Lambda.
+      // Lifecycle rule auto-deletes objects after 2 days (messages expire from DynamoDB after 24h).
+      const emailBucket = new Bucket(stack, "Emails", {
+        cdk: {
+          bucket: {
+            lifecycleRules: [{ expiration: { days: 2 }, id: "expire-raw-email" }],
+          },
+        },
+      });
+
       // SES inbound receive function.
-      // To wire up SES receipt rule after domain verification:
-      //   1. Verify givemeyour.email in SES console (DNS + MX records)
+      // Pre-deploy checklist (one-time, after domain verification):
+      //   1. Verify givemeyour.email in SES (DNS TXT + MX → inbound-smtp.us-east-1.amazonaws.com)
       //   2. Create a receipt rule set and make it active
-      //   3. Add a receipt rule: recipient = *@givemeyour.email, action = Lambda (receiveFunction.functionArn)
-      //   4. Grant SES permission to invoke: receiveFunction.addPermission("ses", { principal: new ServicePrincipal("ses.amazonaws.com") })
+      //   3. Add a receipt rule for *@givemeyour.email with TWO ordered actions:
+      //        a. S3 action  → bucket: EmailsBucket (from stack outputs), prefix: "emails/"
+      //        b. Lambda action → function: ReceiveFunction ARN (from stack outputs)
+      //   4. SES needs permission to write to the bucket — add a bucket policy:
+      //        Principal: ses.amazonaws.com, Action: s3:PutObject, Condition: aws:SourceAccount = <account id>
       const receiveFunction = new SSTFunction(stack, "Receive", {
         handler: "packages/functions/src/receive.handler",
-        bind: [table],
+        bind: [table, emailBucket],
+        environment: {
+          EMAIL_BUCKET: emailBucket.bucketName,
+        },
       });
+
+      emailBucket.attachPermissionsToConsumer("Receive", receiveFunction);
 
       const api = new Api(stack, "Api", {
         routes: {
@@ -43,6 +61,7 @@ export default {
 
       stack.addOutputs({
         ApiEndpoint: api.url,
+        EmailsBucket: emailBucket.bucketName,
         ReceiveFunctionArn: receiveFunction.functionArn,
       });
     });
