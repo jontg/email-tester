@@ -36,12 +36,17 @@ export const handler: SESHandler = async (event) => {
       continue;
     }
 
-    const toAddresses = mail.destination.filter((addr) =>
+    // receipt.recipients is the SMTP envelope — more reliable than mail.destination
+    // (mail.destination reflects To: header only, misses BCC)
+    const toAddresses = receipt.recipients.filter((addr) =>
       addr.toLowerCase().endsWith(`@${DOMAIN}`)
     );
 
-    // SES S3 action writes the raw email to: emails/<messageId>
-    const s3Key = `emails/${mail.messageId}`;
+    // Use the key SES actually wrote, falling back to the conventional prefix
+    const s3Key =
+      receipt.action.type === "S3"
+        ? receipt.action.objectKey
+        : `emails/${mail.messageId}`;
     let parsed: Awaited<ReturnType<PostalMime["parse"]>> | null = null;
 
     try {
@@ -53,6 +58,7 @@ export const handler: SESHandler = async (event) => {
       parsed = await new PostalMime().parse(raw);
     } catch (err) {
       console.error(`Failed to fetch/parse raw email ${s3Key}:`, err);
+      continue;
     }
 
     for (const toAddr of toAddresses) {
