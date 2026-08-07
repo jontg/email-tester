@@ -1,7 +1,0 @@
-{
-  "production-givemeyouremail-Site": {
-    "EmailsBucket": "production-givemeyouremail-si-emailsbucket3559b589-gpkztg1jc8xr",
-    "ReceiveFunctionArn": "arn:aws:lambda:us-east-1:162352110105:function:production-givemeyouremail-Site-Receive14BEA84E-PCUD7jwKcu2u",
-    "ApiEndpoint": "https://icyszbu093.execute-api.us-east-1.amazonaws.com"
-  }
-}
