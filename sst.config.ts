@@ -1,5 +1,6 @@
 import { SSTConfig } from "sst";
 import { Api, Bucket, Table, Function as SSTFunction } from "sst/constructs";
+import { Duration } from "aws-cdk-lib";
 
 export default {
   config(_input) {
@@ -24,7 +25,7 @@ export default {
       const emailBucket = new Bucket(stack, "Emails", {
         cdk: {
           bucket: {
-            lifecycleRules: [{ expiration: { days: 2 }, id: "expire-raw-email" }],
+            lifecycleRules: [{ expiration: Duration.days(2), id: "expire-raw-email" }],
           },
         },
       });
@@ -43,10 +44,9 @@ export default {
         bind: [table, emailBucket],
         environment: {
           EMAIL_BUCKET: emailBucket.bucketName,
+          MESSAGES_TABLE: table.tableName,
         },
       });
-
-      emailBucket.attachPermissionsToConsumer("Receive", receiveFunction);
 
       const api = new Api(stack, "Api", {
         routes: {
@@ -55,7 +55,12 @@ export default {
           "DELETE /inbox/{token}": "packages/functions/src/api.handler",
         },
         defaults: {
-          function: { bind: [table] },
+          function: {
+            bind: [table],
+            environment: {
+              MESSAGES_TABLE: table.tableName,
+            },
+          },
         },
       });
 
